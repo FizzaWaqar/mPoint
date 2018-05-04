@@ -1,0 +1,686 @@
+Ext.Loader.setConfig({enabled: true});
+
+// LIBRARY FOR LIVE SEARCH GRID
+Ext.Loader.setPath('Ext.ux', 'ux');
+
+
+// LIBRARIES
+Ext.require([
+    'Ext.Window',
+    'GeoExt.data.*',
+    'GeoExt.LegendImage',
+    'GeoExt.panel.Map',
+    'GeoExt.data.FeatureStore',
+    'GeoExt.grid.column.Symbolizer',
+    'GeoExt.selection.FeatureModel',
+    'Ext.grid.GridPanel',
+    'Ext.widget.*',
+    'Ext.layout.container.Border',
+    'Ext.container.Viewport',
+    'Ext.layout.container.Border',
+    'GeoExt.tree.Panel',
+    'Ext.tree.plugin.TreeViewDragDrop',
+    'GeoExt.panel.Map',
+    'GeoExt.tree.OverlayLayerContainer',
+    'GeoExt.tree.BaseLayerContainer',
+    'GeoExt.data.LayerTreeModel',
+    'GeoExt.tree.View',
+    'GeoExt.container.VectorLegend',
+    'GeoExt.container.WmsLegend',
+    'GeoExt.container.LayerLegend',
+    'GeoExt.tree.Column',
+    'GeoExt.panel.Legend',
+    'Ext.util.Point',
+    'Ext.panel.Panel',
+    'Ext.ux.LiveSearchGridPanel',
+    'GeoExt.Action',
+    'GeoExt.data.*',
+    'GeoExt.data.MapfishPrintProvider',
+    'GeoExt.panel.PrintMap'
+    
+]);
+
+
+
+// VARIABLES
+var header, headPanel;
+var osm;
+var pakAdm, heatMap;
+var context, template, style, plotLayer;
+var map, mapComponent, mapPanel;
+var socStore;
+var gridWest, gridEast;
+var popup;
+var app;
+var lastFeature;
+
+Ext.application({
+    name: 'GISPLUS - TOTAL SOLUTIONS',
+    
+    launch: function(){
+        // APPLICATION HEADER    class="x-panel-header x-header x-header-noborder x-docked x-unselectable x-panel-header-default x-horizontal x-panel-header-horizontal x-panel-header-default-horizontal x-top x-panel-header-top x-panel-header-default-top x-docked-top x-panel-header-docked-top x-panel-header-default-docked-top"
+        
+        // The PrintProvider that connects us to the print service
+
+                 
+        headPanel = Ext.create('Ext.panel.Panel', {
+            region: 'north',
+            height: 70,
+            contentEl: "title",
+        });
+        
+        // OPEN STREET MAP LAYER
+          var openstreetmap = new OpenLayers.Layer.OSM("OpenStreetMap");
+          var gmap= new OpenLayers.Layer.Google(
+                "Google Satellite",
+                {type: google.maps.MapTypeId.SATELLITE, numZoomLevels: 22}
+            );
+        
+        // GET POINT IMAGES DYNAMICALLY USING CONDITIONS.
+        context = {
+            getColor: function(feature){
+                if (feature.attributes.status == "sold"){
+                    return "blue";
+                }
+                else if (feature.attributes.status == "unsold"){
+                    return "red";
+                }
+            
+            }
+            // getGraphic: function(feature) {
+                // if ((feature.attributes.City == "Lahore") || (feature.attributes.City == "Rawalpindi") || (feature.attributes.City == "Islamabad") || (feature.attributes.City == "Karachi")){
+                    // return "blue.png";
+                // }
+                
+                // else {
+                    // return "red.png";
+                // }
+            // }
+        
+        };
+        
+        // GENERIC SYTLE PROPERTIES
+        template = {
+            cursor: "pointer",
+            fillOpacity: 0.5,
+            fillColor: "${getColor}",
+            strokeWidth: 1,
+            strokeOpacity: 0.5,
+            strokeColor: "${getColor}",
+            pointRadius: 5,
+            graphicZIndex: 1,
+            //externalGraphic: "${getGraphic}"
+                   
+        };
+        
+        
+        // STYLE DECLARATION FOR plotLayer
+        style = new OpenLayers.Style(template, {context: context});
+        
+        var rules = [
+       
+        new OpenLayers.Rule({
+                title: "Unsold Plots",
+                filter: new OpenLayers.Filter.Comparison({
+                type: OpenLayers.Filter.Comparison.EQUAL_TO,
+                property: "status",
+                value: 'unsold'
+            }),
+            symbolizer: {
+            fillOpacity: 1,
+                    fillColor: "red",
+                    strokeWidth: 1,
+                    strokeOpacity: 1,
+                    strokeColor: "black",
+                    graphicZIndex: 1,
+                    label : "${plot_id}",
+                    fontSize: "10px",
+            }
+        }),
+        
+           new OpenLayers.Rule({
+                title: "Incomplete Construction",
+                filter: new OpenLayers.Filter.Comparison({
+                type: OpenLayers.Filter.Comparison.EQUAL_TO,
+                property: "status",
+                value: 'sold'
+            }),
+            symbolizer: {
+            fillOpacity: 1,
+                    fillColor: "blue",
+                    strokeWidth: 1,
+                    strokeOpacity: 1,
+                    strokeColor: "black",
+                    graphicZIndex: 1,
+                    label : "${plot_id}",
+                    fontSize: "10px",
+            }
+        })
+    ];
+    
+
+     style = new OpenLayers.Style(template, {context: context});
+        vecLayer = new OpenLayers.Layer.Vector("Plots Information", {
+            styleMap: new OpenLayers.StyleMap(new OpenLayers.Style({'default': style},{rules: rules})),
+
+        protocol: new OpenLayers.Protocol.WFS({
+        url: "http://localhost/geoserver/wfs",
+        featureNS : "http://localhost/opengeo/project",
+        featureType : "plots_alhafeez",
+        geometryName : "geom",
+        version:"1.1.0",
+        srsName: new OpenLayers.Projection("EPSG:900913"),
+        }),
+        strategies: [new OpenLayers.Strategy.Fixed()]
+        });
+
+        var marla3 = new OpenLayers.Layer.WMS("3 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla3",     
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+
+        var marla4 = new OpenLayers.Layer.WMS("4 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla4",     
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+
+        var marla5 = new OpenLayers.Layer.WMS("5 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla5",      
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+
+        var marla6 = new OpenLayers.Layer.WMS("6 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla6",      
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+
+        var marla7 = new OpenLayers.Layer.WMS("7 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla7",      
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+
+        var marla8 = new OpenLayers.Layer.WMS("8 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla8",      
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+            
+        var marla10 = new OpenLayers.Layer.WMS("10 marla", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:marla10",     
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            });
+            
+        
+            
+                        
+        var comm_plots = new OpenLayers.Layer.WMS("Commercial Plots", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:Commercial_Plots",    
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            //displayInLayerSwitcher: false
+            });
+            
+            
+        var res_plots = new OpenLayers.Layer.WMS("Residential Plots", "http://localhost/geoserver/wms",
+            {
+              format: "image/png8",
+              transparent: true,
+              layers:  "opengeo:Residential_Plots",       
+            }, 
+            {
+            opacity: 1,
+            visibility:false
+            //displayInLayerSwitcher: false
+            });
+            
+            
+
+   var map = new OpenLayers.Map(('map'),{
+          projection: "EPSG:900913",
+          units: "m",
+          layers: [openstreetmap,gmap, comm_plots,res_plots,marla10,marla8,marla7,marla6,marla5,marla4,marla3,vecLayer],
+          center: [8292390.0, 3709400.0],
+          zoom: 19,
+          fallThrough:true
+        });
+        
+
+
+printProvider = Ext.create('GeoExt.data.MapfishPrintProvider', {
+    method: "POST", // "POST" recommended for production use
+    // provide url instead for lazy loading
+    capabilities: printCapabilities,
+    customParams: {
+        mapTitle: "Housing Managemnt Solution",
+        comment: "Land Information System. All rights reserved"
+    }
+});
+    
+
+function print(){
+        printDialog = Ext.create('Ext.Window', {
+            title: "Print Preview",
+            layout: "fit",
+            border: false,
+            width: 350,
+            autoHeight: true,
+            items: [{
+                xtype: "gx_printmappanel",
+                sourceMap: mapPanel,
+                printProvider: printProvider
+            }],
+            bbar: [{
+                text: "Create PDF",
+                handler: function(){
+                    printDialog.items.get(0).print();
+                }
+            }]
+        });
+        printDialog.show();
+}  
+        var ctrl, toolbarItems = [], action, actions = {};
+        
+        var home1 =  new Ext.Button({
+        text    : 'Home',
+        handler : function(btn) {
+        window.location=home;
+        }
+        });
+        toolbarItems.push(home1);
+        toolbarItems.push("-");
+        
+        // ZoomToMaxExtent control, a "button" control
+        var extent =  new Ext.Button({
+            text: "Land Extent",
+            handler: function() {
+                //THE LOADEND EVENT LISTENER - WHEN THE LAYER IS DONE LOADING...
+                map.zoomToExtent(vecLayer.getDataExtent());//ZOOM TO ITS EXTENT!
+            }
+});
+
+
+        toolbarItems.push(extent);
+        toolbarItems.push("-");
+              
+      
+      var includeLegend;
+var print1 =  new Ext.Button({
+            text: "Create PDF",
+           handler: function(btn) 
+           {
+            print();
+           }
+});
+        toolbarItems.push(print1);
+        toolbarItems.push("-");
+
+       var view3d =  new Ext.Button({
+        text    : '3D-View',
+        handler : function(btn) {
+        window.location="http://localhost:9090/Apps/kml.html";
+        }
+        });
+        toolbarItems.push(view3d);
+        toolbarItems.push("-");
+
+
+        ctrl = new OpenLayers.Control.NavigationHistory();
+        map.addControl(ctrl);
+        action = Ext.create('GeoExt.Action', {
+            text: "previous",
+            control: ctrl.previous,
+            disabled: true,
+            tooltip: "previous in history"
+        });
+        actions["previous"] = action;
+        toolbarItems.push(Ext.create('Ext.button.Button', action));
+
+        action = Ext.create('GeoExt.Action', {
+            text: "next",
+            control: ctrl.next,
+            disabled: true,
+            tooltip: "next in history"
+        });
+        actions["next"] = action;
+        toolbarItems.push(Ext.create('Ext.button.Button', action));
+        toolbarItems.push("->");
+
+   
+        // CREATE FEATURE STORE, BINDING IT TO THE vecLayer
+        socStore = Ext.create('GeoExt.data.FeatureStore', {
+            layer: vecLayer,
+
+            fields: [
+                {
+                    name: 'symbolizer',
+                    convert: function(v, r) {
+                            data = r['data']; // 'raw' if extjs 4
+                        return data.layer.styleMap.createSymbolizer(data, 'default');
+                    }
+                },
+                {name: 'gid'},
+                {name: 'plot_id'},
+                {name: 'block_name'},
+                {name: 'status'},
+                {name: 'category'},
+                {name: 'pl_size'},
+                {name: 'pl_dimens'},
+            ],
+
+            autoLoad: true
+        });
+
+        // LIVE SEARCH AND FILTER GRID
+        gridEast= Ext.create('Ext.ux.LiveSearchGridPanel', {
+            
+            // PROPERTIES
+            width: 350,
+            region: "east",
+            store: socStore,
+            collapsible: true,
+            ref:"grid",
+            selType: 'featuremodel',
+            bufferedRenderer : true,
+            // COLUMNS IN GRID
+            columns: [{
+                header:"Symbol",
+                menuDisabled: true,
+                sortable: false,
+                width: 60,
+                xtype: 'gx_symbolizercolumn',
+                dataIndex: "symbolizer"
+            },
+            {  header: "Plot Id",
+                width: 65,
+                dataIndex: "plot_id"
+            }, 
+            {
+                header: "Status",
+                width: 110,
+                dataIndex: "status"
+            },
+            {
+                header: "Block",
+                width: 110,
+                dataIndex: "block_name"
+            },
+            {
+                header: "Category.",
+                width: 110,
+                dataIndex: "category"
+            }, {
+                header: "Size",
+                width: 80,
+                dataIndex: "pl_size"
+            },
+             {
+                header: "Dimension",
+                width: 100,
+                dataIndex: "pl_dimens"
+            }],
+
+                        // EVENT ACTIONS
+            listeners: {
+            // WHEN WE SEARCH
+            afterrender: function() {
+                var me = this,
+                    socStore = me.getStore();
+                
+                me.textField.on('change', function(cmp) {
+                    var searchValue = cmp.getValue();
+                    
+                    socStore.clearFilter(true);
+                    
+                    if (!searchValue)
+                    {
+                        return;
+                    }
+                    
+                    socStore.filter(function (record){
+                        var PlotId = record.get('plot_id'); // you can filter store by some column
+                    
+                        
+                        if (!me.caseSensitive){
+                            PlotId = PlotId.toLowerCase();
+                            searchValue = searchValue.toLowerCase();
+                        }
+                        
+                        if (me.regExpMode){
+                            debugger;
+                            var match = PlotId.match(searchValue);
+                           
+                            
+                                return match 
+                                ? this.indexOf(match[0])
+                                : -1;
+                            
+                        }
+                        
+                         
+                            return PlotId.indexOf(searchValue) != -1;
+                    
+                    });
+                })
+            }
+        },
+        bbar:[
+        {
+            xtype: 'button',
+            text:'Zoom to Plot',
+            handler: function() 
+            { 
+                var feature= gridEast.getSelectionModel().getSelection();
+                mapPanel.map.zoomToExtent(feature[0].data.geometry.getBounds());
+            }
+            }
+        
+        ]
+            
+   
+        });
+        
+    var selectCtrl = new OpenLayers.Control.SelectFeature(vecLayer, {onSelect: createPopup, onUnselect: destroyPopup});
+        
+        // CREATE POPUP
+        vecLayer.events.on({
+            "featureselected": createPopup,
+            "featureunselected": destroyPopup
+        });
+        
+        map.addControl(selectCtrl);
+        selectCtrl.activate();
+        
+
+        function createPopup(e){
+            
+            if(lastFeature)
+            {
+                if(lastFeature.popup)
+                {
+                    lastFeature.popup = null;
+                    lastFeature.popup.close();
+                }
+                
+            }
+            
+            var feature = e.feature;
+            lastFeature = feature;
+            
+            popupOpts = Ext.apply({
+                title: 'Plot Information',
+                location: feature,
+                width:250,
+                height:450,
+                autoScroll: true,
+                map: map,
+                 html: "<img src = 'src/geoext2/examples/lis/images/pic.png'>" +
+                    '<p>Plot ID:   ' + feature.attributes.plot_id + '</p>' +
+                    '<p>status:    ' + feature.attributes.status + '</p>'+
+                    '<p>Category:' + feature.attributes.category+ '</p>' +
+                    '<p>Block: ' + feature.attributes.block_name + '</p>'+
+                    '<p>Size: ' + feature.attributes.pl_size + '</p>'+
+                    '<p>Dimensions:  ' + feature.attributes.pl_dimens+ '</p>' + '</p>' ,
+                                maximizable: true,
+                collapsible: true,
+                anchorPosition: 'auto',
+                alwaysOnTop: true,
+                autoDestroy: true
+            });
+
+            popup = Ext.create('GeoExt.window.Popup', popupOpts);
+            // unselect feature when the popup
+            // is closed
+            popup.on({
+                close: function() {
+                    if(OpenLayers.Util.indexOf(vecLayer.selectedFeatures,
+                                               this.feature) > -1) {
+                        selectCtrl.unselect(this.feature);
+                    }
+                }
+            });
+            
+            popup.show();
+        }
+        
+        
+        function destroyPopup(e) {
+            
+            e.feature.popup = null;
+            
+            
+        }   
+map.addControl(new OpenLayers.Control.LayerSwitcher());
+map.addControl(new OpenLayers.Control.MousePosition());
+map.addControl(new OpenLayers.Control.Scale());
+
+         // create map panel
+        mapPanel = Ext.create('GeoExt.panel.Map', {
+            title: "Map",
+            region: "center",
+            height: 150,
+            width: 600,
+            map: map,
+                projection: "EPSG:900913",
+            dockedItems: [{
+                xtype: 'toolbar',
+                dock: 'top',
+                items: toolbarItems
+            }]
+        });
+        
+     var store = Ext.create('Ext.data.TreeStore', {
+            model: "GeoExt.data.LayerTreeModel",
+            root: {
+                expanded: true,
+                children: [
+                    {
+                        plugins: [{
+                            ptype: 'gx_overlaylayercontainer',
+                            store: mapPanel.layers
+                        }],
+                        expanded: true
+                    }, {
+                        plugins: ['gx_baselayercontainer'],
+                        expanded: true,
+                        text: "Base Maps"
+                    }
+                ]
+            }
+        });
+
+        tree = Ext.create('GeoExt.tree.Panel', {
+            border: true,
+            region: "west",
+            title: "Layers",
+            width: 200,
+            split: true,
+            store: store,
+            collapsible: true,
+       
+            autoScroll: true,
+            rootVisible: false,
+            lines: false
+        });
+/*        
+        tree.getRootNode().appendChild({
+            text: "Root",
+            group: true,            
+            children: [
+                    {
+                        text: "marla20",
+                        layer: "opengeo:marla20",
+                        leaf: true,
+                        oncheckchange:true,
+                        checked: true,
+                        children: [],
+                        nodeType: "gx_layer"
+                    },
+                    {
+                        "text": "marla15",
+                        "layer": "opengeo:marla15",
+                        "leaf": false,
+                        "checked": true,
+                        "oncheckchange":true,
+                        "children": [],
+                        "nodeType": "gx_layer"
+                    }
+                ],
+            expanded: true
+        });
+*/
+        // VIEWPORT FOR RENDERING OBJECTS TO BODY
+        Ext.create('Ext.container.Viewport', {
+            ref:'app',
+            layout: 'border',
+            items: [mapPanel, tree, gridEast, headPanel]
+        });
+    }
+
+});
+ 

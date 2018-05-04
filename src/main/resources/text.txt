@@ -1,0 +1,4 @@
+I love solving data mining problems.
+I don’t like solving data mining problems.
+I love solving data science problems.
+I don’t like solving data science problems.
