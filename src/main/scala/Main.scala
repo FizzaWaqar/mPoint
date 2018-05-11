@@ -40,7 +40,6 @@ object Main {
     return null
   }
 
-  //def lineStringsFiltering(geometries: RDD[mPoint], StartT: String, EndT: String)= {
   def lineStringsFiltering(geometries: RDD[mPoint], StartT: String, EndT: String, intersectingLine: LineString) : RDD[Geometry]= {
     val TimeStamps= geometries.map(x=> (x.TID, x.getTimeStamps)).collect()
     var  filteredLineStrings: RDD[Geometry] = sc.emptyRDD
