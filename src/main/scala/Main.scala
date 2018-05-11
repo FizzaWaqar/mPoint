@@ -6,10 +6,11 @@ import java.util.ArrayList
 import com.vividsolutions.jts.geom.{util => _, _}
 import com.vividsolutions.jts.io.WKTReader
 import main.scala.jtsSpark.mPoint
+import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{StructField, _}
 import org.apache.spark.sql.{Row, _}
-import org.apache.spark.{SparkConf, SparkContext}
+import org.apache.spark.{Partition, SparkConf, SparkContext, TaskContext}
 
 object Main {
 
@@ -20,6 +21,7 @@ object Main {
   val sqlContext = SparkSession.builder().appName("Spark In Action").master("local").getOrCreate()
 
   val factory: GeometryFactory = new GeometryFactory
+
   def dateParse(DT: String): Timestamp = {
     val dateFormats: util.List[SimpleDateFormat] = new util.ArrayList[SimpleDateFormat](3)
     dateFormats.add(new SimpleDateFormat("yyyy-MM-dd-HH:mm:ss.SSS"))
@@ -38,23 +40,42 @@ object Main {
     return null
   }
 
-  def lineIntersectionRDD(geometries: RDD[mPoint], intersectingLine: LineString): RDD[MultiPoint]= {
+  //def lineStringsFiltering(geometries: RDD[mPoint], StartT: String, EndT: String)= {
+  def lineStringsFiltering(geometries: RDD[mPoint], StartT: String, EndT: String, intersectingLine: LineString) : RDD[Geometry]= {
+    val TimeStamps= geometries.map(x=> (x.TID, x.getTimeStamps)).collect()
+    var  filteredLineStrings: RDD[Geometry] = sc.emptyRDD
+    for (i <- 0 until TimeStamps.size)
+    {
+        System.out.println(TimeStamps(i)._2.head + " " + TimeStamps(i)._2.last)
+        if (TimeStamps(i)._2.head.getTime >= dateParse(StartT).getTime && TimeStamps(i)._2.last.getTime <= dateParse(EndT).getTime)
+        {
+          System.out.println(TimeStamps(i)._1)
+          val filtered: RDD[Geometry]= geometries.filter(_.TID == TimeStamps(i)._1).map(x => x.getLineString)
+          filteredLineStrings= filteredLineStrings.union(filtered)
+        }
+    }
+    val geomList : util.ArrayList[Geometry]= new util.ArrayList[Geometry]()
+    for (e <- filteredLineStrings.collect()) geomList.add(e)
+    val geometryCollection: Geometry = factory.buildGeometry(geomList)
+    val union: Geometry = geometryCollection.union
+    val ab: Geometry= geometryCollection.intersection(intersectingLine)
+    val pointRDD: RDD[Geometry]= sc.parallelize(Seq(ab))
+    return pointRDD
+  }
+
+  def lineIntersectionRDD(geometries: RDD[mPoint], intersectingLine: LineString): RDD[Geometry]= {
     val lineStrings: RDD[Geometry]= geometries.map(x=> x.getLineString)
     val geom = lineStrings.collect()
     val geomList : util.ArrayList[Geometry]= new util.ArrayList[Geometry]()
     for (e <- geom) geomList.add(e)
-    val geometryCollection: GeometryCollection = factory.buildGeometry(geomList).asInstanceOf[GeometryCollection]
+    val geometryCollection: Geometry = factory.buildGeometry(geomList)
     val union: Geometry = geometryCollection.union
-    val ab: MultiPoint= geometryCollection.intersection(intersectingLine).asInstanceOf[MultiPoint]
-
-    val pointRDD: RDD[MultiPoint]= sc.parallelize(Seq(ab))
-
+    val ab: Geometry= geometryCollection.intersection(intersectingLine)
+    val pointRDD: RDD[Geometry]= sc.parallelize(Seq(ab))
     return pointRDD
-
   }
 
   def main(args: Array[String]) {
-
     val textFile = sc.textFile("src/main/resources/mpoints.csv")
     val header = textFile.first();
     System.out.println(header);
@@ -81,7 +102,9 @@ object Main {
     System.out.println("mPoint intersection with Linestring" + "\n")
     lineIntersectionRDD(aggregatedRdd,intersectingLine).foreach(println)
 
-    System.out.println("mPoint intersection with Points" + "\n")
+    System.out.println("Printing TimeStamps")
+    lineStringsFiltering(aggregatedRdd,"2007-05-28-09:00:55.846", "2007-05-28-10:30:55.846",intersectingLine).collect().foreach(println)
+
 
   }
 }
