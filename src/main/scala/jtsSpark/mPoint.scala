@@ -27,6 +27,13 @@ case class mPoint(TID: Integer, X: Array[Double], Y:Array[Double], Time:Array[Ti
     return Time
   }
 
+  def getStartTime: Timestamp = {
+    return Time.head
+  }
+
+  def getEndTime: Timestamp = {
+    return Time.last
+  }
 
   def getLineString: LineString = {
     val temp: Array[Coordinate] = new Array[Coordinate](X.size)

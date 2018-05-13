@@ -13,7 +13,6 @@ import org.apache.spark.sql.{Row, _}
 import org.apache.spark.{Partition, SparkConf, SparkContext, TaskContext}
 
 object Main {
-
   val conf = new SparkConf()
   conf.setMaster("local")
   conf.setAppName("Word Count")
@@ -39,6 +38,28 @@ object Main {
     }
     return null
   }
+
+  def mPointIntersection(geometries: RDD[mPoint], mp :mPoint) : RDD[Geometry]= {
+    val TimeStamps= geometries.map(x=> (x.TID, x.getTimeStamps)).collect()
+    var  filteredLineStrings: RDD[Geometry] = sc.emptyRDD
+    for (i <- 0 until TimeStamps.size)
+    {
+      System.out.println(TimeStamps(i)._2.head + " " + TimeStamps(i)._2.last)
+      if (TimeStamps(i)._2.head.getTime >= mp.getStartTime.getTime && TimeStamps(i)._2.last.getTime <= mp.getEndTime.getTime)
+      {
+        val filtered: RDD[Geometry]= geometries.filter(_.TID == TimeStamps(i)._1).map(x => x.getLineString)
+        filteredLineStrings= filteredLineStrings.union(filtered)
+      }
+    }
+    val geomList : util.ArrayList[Geometry]= new util.ArrayList[Geometry]()
+    for (e <- filteredLineStrings.collect()) geomList.add(e)
+    val geometryCollection: Geometry = factory.buildGeometry(geomList)
+    val union: Geometry = geometryCollection.union
+    val ab: Geometry= geometryCollection.intersection(mp.getLineString)
+    val pointRDD: RDD[Geometry]= sc.parallelize(Seq(ab))
+    return pointRDD
+  }
+
 
   def lineStringsFiltering(geometries: RDD[mPoint], StartT: String, EndT: String, intersectingLine: LineString) : RDD[Geometry]= {
     val TimeStamps= geometries.map(x=> (x.TID, x.getTimeStamps)).collect()
@@ -94,6 +115,10 @@ object Main {
     .map(row => mPoint(row._1, row._2.map(_.getAs[String]("X")).toArray.map(x => x.toDouble),
       row._2.map(_.getAs[String]("Y")).toArray.map(x => x.toDouble), row._2.map(_.getAs[String]("time")).toArray.map(x => dateParse(x))))
 
+    val newMpoint= mPoint(4,Array(72.850527194320122,72.853311163696944,72.85728486357668,72.859093253941111,72.862591061619682,72.864946728015454,72.870562255989213),
+      Array(33.366328743877844, 33.370611773688339, 33.370516595248105, 33.366447716928135,33.366614279198544,33.368969945594316, 33.367351912110351),
+      Array(dateParse("2007-05-28-08:00:55.846"),dateParse("2007-05-28-08:15:55.846"), dateParse("2007-05-28-08:30:55.846"), dateParse("2007-05-28-08:45:55.846"), dateParse("2007-05-28-09:00:55.846"),
+        dateParse("2007-05-28-09:15:55.846"), dateParse("2007-05-28-09:30:55.846")))
 
   val lineCords: Array[Coordinate] = Array(new Coordinate(72.850527194320122, 33.366328743877844), new Coordinate(72.853311163696944, 33.370611773688339), new Coordinate(72.85728486357668, 33.370516595248105), new Coordinate(72.859093253941111, 33.366447716928135), new Coordinate(72.862591061619682, 33.366614279198544), new Coordinate(72.864946728015454, 33.368969945594316), new Coordinate(72.870562255989213, 33.367351912110351))
   val intersectingLine: LineString = factory.createLineString(lineCords)
@@ -105,6 +130,8 @@ object Main {
     lineStringsFiltering(aggregatedRdd,"2007-05-28-09:00:55.846", "2007-05-28-10:30:55.846",intersectingLine).collect().foreach(println)
 
 
+    System.out.println("Final mPoint Intersection")
+    mPointIntersection(aggregatedRdd, newMpoint).foreach(println)
   }
 }
 
