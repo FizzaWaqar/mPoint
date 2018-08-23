@@ -15,7 +15,7 @@ import org.apache.spark.{Partition, SparkConf, SparkContext, TaskContext}
 object Main {
   val conf = new SparkConf()
   conf.setMaster("local")
-  conf.setAppName("Word Count")
+  conf.setAppName("mPoints Intersection")
   val sc = new SparkContext(conf)
   val sqlContext = SparkSession.builder().appName("Spark In Action").master("local").getOrCreate()
 
@@ -24,8 +24,12 @@ object Main {
   def dateParse(DT: String): Timestamp = {
     val dateFormats: util.List[SimpleDateFormat] = new util.ArrayList[SimpleDateFormat](3)
     dateFormats.add(new SimpleDateFormat("yyyy-MM-dd-HH:mm:ss.SSS"))
+    dateFormats.add(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS"))
     dateFormats.add(new SimpleDateFormat("yyyy-MM-dd-HH:mm"))
+    dateFormats.add(new SimpleDateFormat("yyyy-MM-dd HH:mm"))
+    dateFormats.add(new SimpleDateFormat("yyyy-MM-dd"))
     dateFormats.add(new SimpleDateFormat("yyyy-MM-dd-HH:mm:ss"))
+    dateFormats.add(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"))
     import scala.collection.JavaConversions._
     for (formatString <- dateFormats) {
       try {
@@ -39,99 +43,55 @@ object Main {
     return null
   }
 
-  def mPointIntersection(geometries: RDD[mPoint], mp :mPoint) : RDD[Geometry]= {
-    val TimeStamps= geometries.map(x=> (x.TID, x.getTimeStamps)).collect()
-    var  filteredLineStrings: RDD[Geometry] = sc.emptyRDD
-    for (i <- 0 until TimeStamps.size)
-    {
-      System.out.println(TimeStamps(i)._2.head + " " + TimeStamps(i)._2.last)
-      if (TimeStamps(i)._2.head.getTime >= mp.getStartTime.getTime && TimeStamps(i)._2.last.getTime <= mp.getEndTime.getTime)
-      {
-        val filtered: RDD[Geometry]= geometries.filter(_.TID == TimeStamps(i)._1).map(x => x.getLineString)
-        filteredLineStrings= filteredLineStrings.union(filtered)
-      }
-    }
-    val geomList : util.ArrayList[Geometry]= new util.ArrayList[Geometry]()
-    for (e <- filteredLineStrings.collect()) geomList.add(e)
-    val geometryCollection: Geometry = factory.buildGeometry(geomList)
-    val union: Geometry = geometryCollection.union
-    val ab: Geometry= geometryCollection.intersection(mp.getLineString)
-    val pointRDD: RDD[Geometry]= sc.parallelize(Seq(ab))
-    return pointRDD
-  }
+ //Intersection Operation
+  def mPointIntersection(allMPoints: RDD[mPoint], mp :mPoint) = {
+    val intersectionResult = allMPoints.filter(x => (x.getStartTime.getTime >= mp.getStartTime.getTime
+      && x.getEndTime.getTime <= mp.getEndTime.getTime
+      && x.getLineString.intersects(mp.getLineString)==true) //Data filtering for intersection
+    ).map(x => (x.TID, x.getLineString.intersection(mp.getLineString))).collect() // Final action to execute all transformations
 
-
-  def lineStringsFiltering(geometries: RDD[mPoint], StartT: String, EndT: String, intersectingLine: LineString) : RDD[Geometry]= {
-    val TimeStamps= geometries.map(x=> (x.TID, x.getTimeStamps)).collect()
-    var  filteredLineStrings: RDD[Geometry] = sc.emptyRDD
-    for (i <- 0 until TimeStamps.size)
-    {
-        System.out.println(TimeStamps(i)._2.head + " " + TimeStamps(i)._2.last)
-        if (TimeStamps(i)._2.head.getTime >= dateParse(StartT).getTime && TimeStamps(i)._2.last.getTime <= dateParse(EndT).getTime)
-        {
-          System.out.println(TimeStamps(i)._1)
-          val filtered: RDD[Geometry]= geometries.filter(_.TID == TimeStamps(i)._1).map(x => x.getLineString)
-          filteredLineStrings= filteredLineStrings.union(filtered)
-        }
-    }
-    val geomList : util.ArrayList[Geometry]= new util.ArrayList[Geometry]()
-    for (e <- filteredLineStrings.collect()) geomList.add(e)
-    val geometryCollection: Geometry = factory.buildGeometry(geomList)
-    val union: Geometry = geometryCollection.union
-    val ab: Geometry= geometryCollection.intersection(intersectingLine)
-    val pointRDD: RDD[Geometry]= sc.parallelize(Seq(ab))
-    return pointRDD
-  }
-
-  def lineIntersectionRDD(geometries: RDD[mPoint], intersectingLine: LineString): RDD[Geometry]= {
-    val lineStrings: RDD[Geometry]= geometries.map(x=> x.getLineString)
-    val geom = lineStrings.collect()
-    val geomList : util.ArrayList[Geometry]= new util.ArrayList[Geometry]()
-    for (e <- geom) geomList.add(e)
-    val geometryCollection: Geometry = factory.buildGeometry(geomList)
-    val union: Geometry = geometryCollection.union
-    val ab: Geometry= geometryCollection.intersection(intersectingLine)
-    val pointRDD: RDD[Geometry]= sc.parallelize(Seq(ab))
-    return pointRDD
   }
 
   def main(args: Array[String]) {
-    val textFile = sc.textFile("src/main/resources/mpoints.csv")
+
+    val t0 = System.nanoTime() //get initial time
+    val textFile = sc.textFile("src/main/resources/trips37.csv") //Trajectory Data
     val header = textFile.first();
     System.out.println(header);
-    val delimiter = ","
-    val schemaString = header.split(delimiter) //csv header
-
-    val schema = StructType(schemaString.map(fieldName => StructField(fieldName, StringType, true)))
+    val delimiter = ",";
+    val schemaString = header.split(delimiter); //csv header
+    val schema = StructType(schemaString.map(fieldName => StructField(fieldName, StringType, true))) //creating schema from file header
     System.out.println(schema);
-    val mpointLines = textFile.flatMap(x => x.split("\n"))
-    val rowRDD = mpointLines.map(p => {
+
+
+    val textFile2 = sc.textFile("src/main/resources/prepared.csv")  // new mPoint
+    val mpointLines2 = textFile2.flatMap(x => x.split("\n"));
+    val rowRDD2 = mpointLines2.map(p => {
       Row.fromSeq(p.split(delimiter))
+    }).mapPartitionsWithIndex { (idx, iter) => if (idx == 0) iter.drop(1) else iter };
+    val mpointDF2 = sqlContext.createDataFrame(rowRDD2, schema);
+    // mpointDF2.collect().foreach(println);
+
+    val newMpoint= new mPoint(1, mpointDF2.select("X").rdd.map(r => r(0)).collect().map(x=>x.toString).map(x=>x.toDouble),
+      mpointDF2.select("Y").rdd.map(r => r(0)).collect().map(x=>x.toString).map(x=>x.toDouble),
+      mpointDF2.select("time").rdd.map(r => r(0)).collect().map(x=>x.toString).map(x=>dateParse(x))); //creating mPoint object from dataframe
+
+
+
+    val mpointLines = textFile.flatMap(x => x.split("\n"))
+    val rowRDD = mpointLines.map(p => { Row.fromSeq(p.split(delimiter))
     }).mapPartitionsWithIndex { (idx, iter) => if (idx == 0) iter.drop(1) else iter }
-    val mpointDF = sqlContext.createDataFrame(rowRDD, schema)
-    System.out.print(mpointDF.show());
-
-  val aggregatedRdd: RDD[mPoint] = mpointDF.rdd.groupBy(r => r.getAs[String]("TID").toInt)
-    .map(row => mPoint(row._1, row._2.map(_.getAs[String]("X")).toArray.map(x => x.toDouble),
-      row._2.map(_.getAs[String]("Y")).toArray.map(x => x.toDouble), row._2.map(_.getAs[String]("time")).toArray.map(x => dateParse(x))))
-
-    val newMpoint= mPoint(4,Array(72.850527194320122,72.853311163696944,72.85728486357668,72.859093253941111,72.862591061619682,72.864946728015454,72.870562255989213),
-      Array(33.366328743877844, 33.370611773688339, 33.370516595248105, 33.366447716928135,33.366614279198544,33.368969945594316, 33.367351912110351),
-      Array(dateParse("2007-05-28-08:00:55.846"),dateParse("2007-05-28-08:15:55.846"), dateParse("2007-05-28-08:30:55.846"), dateParse("2007-05-28-08:45:55.846"), dateParse("2007-05-28-09:00:55.846"),
-        dateParse("2007-05-28-09:15:55.846"), dateParse("2007-05-28-09:30:55.846")))
-
-  val lineCords: Array[Coordinate] = Array(new Coordinate(72.850527194320122, 33.366328743877844), new Coordinate(72.853311163696944, 33.370611773688339), new Coordinate(72.85728486357668, 33.370516595248105), new Coordinate(72.859093253941111, 33.366447716928135), new Coordinate(72.862591061619682, 33.366614279198544), new Coordinate(72.864946728015454, 33.368969945594316), new Coordinate(72.870562255989213, 33.367351912110351))
-  val intersectingLine: LineString = factory.createLineString(lineCords)
-
-    System.out.println("mPoint intersection with Linestring" + "\n")
-    lineIntersectionRDD(aggregatedRdd,intersectingLine).foreach(println)
-
-    System.out.println("Printing TimeStamps")
-    lineStringsFiltering(aggregatedRdd,"2007-05-28-09:00:55.846", "2007-05-28-10:30:55.846",intersectingLine).collect().foreach(println)
+    val mpointDF = sqlContext.createDataFrame(rowRDD, schema) //creating dataframe for trajectory data
 
 
-    System.out.println("Final mPoint Intersection")
-    mPointIntersection(aggregatedRdd, newMpoint).foreach(println)
+    var aggregatedRdd: RDD[mPoint]= mpointDF.rdd.groupBy(r => r.getAs[String]("TID").toInt).filter(_._2.toSeq.length > 1)
+      .map(row => mPoint(row._1, row._2.map(_.getAs[String]("X")).toArray.map(x => x.toDouble),
+        row._2.map(_.getAs[String]("Y")).toArray.map(x => x.toDouble), row._2.map(_.getAs[String]("Time")).toArray.map(x => dateParse(x))))
+    //mPoint objects RDD to store all mPoints
+
+    mPointIntersection(aggregatedRdd,newMpoint) // Intersection operation on trajectory data with new mPoint
+    val t1 = System.nanoTime() //final time
+    println("Elapsed time: " + ((t1 - t0)/1000000000) + " secs") // Get Elaspsed time
   }
 }
 
